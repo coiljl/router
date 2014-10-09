@@ -9,6 +9,19 @@ type Router
   Router(c=Dict{String,Router}(), a=(Regex,Router)[]) = new(c, a)
 end
 
+##
+# Support use with downstream middleware
+#
+function handle(router::Router, next::Function)
+  function(req::Request)
+    res = handle(router, req)
+    403 < res.status < 406 ? next(req) : res
+  end
+end
+
+##
+# Dispatch a Request to a handler on router
+#
 function handle(router::Router, req::Request)
   m = match(router, req.uri.path)
   m === nothing && return Response(404, "invalid path")
@@ -32,6 +45,12 @@ function allows(r::Router)
   end |> unique
 end
 
+##
+# Find Router nodes on `r` matching the path `p`
+#
+# If it matches on any abstract paths the concrete values
+# of those path segments will be returned in a `String[]`
+#
 function Base.match(r::Router, p::String)
   captures = String[]
   for seg in split(p, '/', false)
@@ -47,8 +66,11 @@ function Base.match(r::Router, p::String)
   (r, captures)
 end
 
-function create!(r::Router, p::String)
-  reduce(r, split(p, '/', false)) do node, segment
+##
+# Define a route for `path` on `node`
+#
+function create!(node::Router, path::String)
+  reduce(node, split(path, '/', false)) do node, segment
     m = match(r"^:[^(]*(?:\(([^\)]*)\))?$"i, segment)
     if m === nothing
       get!(node.concrete, segment, Router())
