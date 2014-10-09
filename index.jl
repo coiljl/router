@@ -29,8 +29,7 @@ function handle(router::Router, req::Request)
 
   isdefined(node, :handler) || return Response(404, "incomplete path")
 
-  signature = tuple(typeof(req), fill(Any, length(params))...)
-  if method_exists(node.handler, signature)
+  if applicable(node.handler, req, params...)
     node.handler(req, params...)
   else
     Response(verb(req) == "OPTIONS" ? 204 : 405, # OPTIONS support
