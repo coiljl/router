@@ -1,28 +1,26 @@
-@require "Request" Request verb
-@require "Response" Response
-@require "coerce" coerce
+@require "github.com/coiljl/server" Request Response serve verb
+@require "github.com/jkroso/coerce.jl" coerce
 
 type Router
-  concrete::Dict{String,Router}
-  Abstract::Vector{(Regex,Router)}
+  concrete::Dict{AbstractString,Router}
+  Abstract::Vector{Tuple{Regex,Router}}
   handler::Function
-  Router(c=Dict{String,Router}(), a=(Regex,Router)[]) = new(c, a)
+  Router(c=Dict{AbstractString,Router}(), a=Tuple{Regex,Router}[]) = new(c, a)
 end
 
-##
-# Support use with downstream middleware
-#
-function handle(router::Router, next::Function)
+"""
+Support use with downstream middleware
+"""
+handle(router::Router, next::Function) =
   function(req::Request)
     res = handle(router, req)
     403 < res.status < 406 ? next(req) : res
   end
-end
 
-##
-# Dispatch a Request to a handler on router
-#
-function handle(router::Router, req::Request)
+"""
+Dispatch a Request to a handler on router
+"""
+handle(router::Router, req::Request) = begin
   m = match(router, req.uri.path)
   m === nothing && return Response(404, "invalid path")
   node, params = m
@@ -33,26 +31,29 @@ function handle(router::Router, req::Request)
     node.handler(req, params...)
   else
     Response(verb(req) == "OPTIONS" ? 204 : 405, # OPTIONS support
-             ["Allow" => join(allows(node), ", ")])
+             Dict("Allow" => join(allows(node), ", ")))
   end
 end
 
-function allows(r::Router)
-  !isdefined(r, :handler) && return String[]
+"""
+The list of HTTP methods supported by a `Router`
+"""
+allows(r::Router) = begin
+  !isdefined(r, :handler) && return AbstractString[]
   map(methods(r.handler)) do method
     string(method.sig[1].parameters[1])
   end |> unique
 end
 
-##
-# Find Router nodes on `r` matching the path `p`
-#
-# If it matches on any abstract paths the concrete values
-# of those path segments will be returned in a `String[]`
-#
-function Base.match(r::Router, p::String)
-  captures = String[]
-  for seg in split(p, '/', false)
+"""
+Find Router nodes on `r` matching the path `p`
+
+If it matches on any abstract paths the concrete values
+of those path segments will be returned in a `AbstractString[]`
+"""
+Base.match(r::Router, p::AbstractString) = begin
+  captures = AbstractString[]
+  for seg in split(p, '/'; keep=false)
     if haskey(r.concrete, seg)
       r = r.concrete[seg]
     else
@@ -65,16 +66,15 @@ function Base.match(r::Router, p::String)
   (r, captures)
 end
 
-##
-# Define a route for `path` on `node`
-#
-function create!(node::Router, path::String)
-  reduce(node, split(path, '/', false)) do node, segment
+"""
+Define a route for `path` on `node`
+"""
+create!(node::Router, path::AbstractString) =
+  reduce(node, split(path, '/'; keep=false)) do node, segment
     m = match(r"^:[^(]*(?:\(([^\)]*)\))?$"i, segment)
     if m === nothing
       get!(node.concrete, segment, Router())
     else
-      # verbose because `::Regex == ::Regex` is broken
       r = to_regex(m.captures[1])
       i = findfirst(t -> t[1].pattern == r.pattern, node.Abstract)
       if i === 0
@@ -85,24 +85,25 @@ function create!(node::Router, path::String)
       end
     end
   end
-end
 
-to_regex(s::Nothing) = r"(.*)"
-to_regex(s::String) = Regex(s, "i")
+to_regex(s::Void) = r"(.*)"
+to_regex(s::AbstractString) = Regex(s, "i")
+
+to_regex("user/:id(\\d+)")
 
 const stack = Router[]
 
-##
-# Syntax sugar for defining routes
-#
-# If you pass an Expr it will define a group of routes and return
-# a function which dispatches Requests to those routes
-#
-# If you pass both a Function Expr and a String it will define a new
-# route with the Function Expr as the handler. Any parameters defined
-# in the path will be coerced to the types declared in the Function
-# Expr. This form is only valid inside the previous form
-#
+"""
+Syntax sugar for defining routes
+
+If you pass a block `Expr` it will define a group of `Route`s and return
+a `Function` which dispatches `Request`s to these `Route`s
+
+If you pass both a Function Expr and an `AbstractString` it will define a
+new `Route` with the Function Expr as the handler. Any parameters defined
+in the path will be coerced to the types declared in the Function
+Expr. This form is only valid inside the previous form
+"""
 macro route(fn::Expr, path...)
   if isempty(path)
     quote
@@ -123,7 +124,7 @@ macro route(fn::Expr, path...)
     end
     body = fn.args[2].args
     quote
-      @assert !isempty(stack) "@route(::Function,::String) only valid within @route(::Expr)"
+      @assert !isempty(stack) "@route(::Function,::AbstractString) only valid within @route(::Expr)"
       $(esc(:(function $sym($(params...))
         $(coersion...)
         $(body...)

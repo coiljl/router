@@ -1,7 +1,5 @@
-@require "Response" Response
-@require "Request" Request
-@require "router" @route
-@require "server" start
+@require "github.com/coiljl/server" Request Response serve
+@require ".." @route
 
 router = @route begin
   @route("hit") do r::Request
@@ -9,8 +7,11 @@ router = @route begin
   end
 end
 
-function downstream(r::Request)
-  Response(200, "Handled downstream")
-end
+downstream(r::Request) = Response(200, "Handled downstream")
 
-start(router(downstream), 8000)
+const server = serve(router(downstream), 8000)
+
+println("Server running at http://localhost:8000")
+println("try `curl :8000`")
+println("then `curl :8000/hit`")
+wait(server)
