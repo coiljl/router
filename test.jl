@@ -3,18 +3,17 @@
 base = Router()
 
 test("abstract matches") do
-  child = create!(base, "users/:id")
+  child = create!(base, "users/:id", identity)
   @test isa(child, Router)
   @test match(base, "users/1") == (child, ["1"])
-  @test child === create!(base, "/users/:id")
+  @test child === create!(base, "/users/:id", identity)
 end
 
-base.concrete
 test("concrete matches") do
-  child = create!(base, "users/admin")
+  child = create!(base, "users/admin", identity)
   @test isa(child, Router)
   @test match(base, "users/admin") == (child, AbstractString[])
-  @test child === create!(base, "/users/admin")
+  @test child === create!(base, "/users/admin", identity)
 end
 
 test("no match") do

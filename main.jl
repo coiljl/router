@@ -1,12 +1,15 @@
 @require "github.com/coiljl/server" Request Response serve verb
 @require "github.com/jkroso/coerce.jl" coerce
 
-type Router
+immutable Router
+  handler::Function
   concrete::Dict{AbstractString,Router}
   Abstract::Vector{Tuple{Regex,Router}}
-  handler::Function
-  Router(c=Dict{AbstractString,Router}(), a=Tuple{Regex,Router}[]) = new(c, a)
 end
+
+Router(f::Function=identity,
+       c=Dict{AbstractString,Router}(),
+       a=Tuple{Regex,Router}[]) = Router(f, c, a)
 
 """
 Support use with downstream middleware
@@ -39,10 +42,10 @@ end
 The list of HTTP methods supported by a `Router`
 """
 allows(r::Router) = begin
-  !isdefined(r, :handler) && return AbstractString[]
-  map(methods(r.handler)) do method
-    string(method.sig[1].parameters[1])
-  end |> unique
+  verbs = map(methods(r.handler)) do method
+    string(method.sig.parameters[1].parameters[1])
+  end
+  setdiff(unique(verbs), ["method"])
 end
 
 """
@@ -69,16 +72,16 @@ end
 """
 Define a route for `path` on `node`
 """
-create!(node::Router, path::AbstractString) =
+create!(node::Router, path::AbstractString, fn::Function) =
   reduce(node, split(path, '/'; keep=false)) do node, segment
     m = match(r"^:[^(]*(?:\(([^\)]*)\))?$"i, segment)
     if m === nothing
-      get!(node.concrete, segment, Router())
+      get!(node.concrete, segment, Router(fn))
     else
       r = to_regex(m.captures[1])
       i = findfirst(t -> t[1].pattern == r.pattern, node.Abstract)
       if i === 0
-        push!(node.Abstract, (r, Router()))
+        push!(node.Abstract, (r, Router(fn)))
         node.Abstract[end][2]
       else
         node.Abstract[i][2]
@@ -129,7 +132,7 @@ macro route(fn::Expr, path...)
         $(coersion...)
         $(body...)
       end)))
-      create!(stack[end], $path).handler = $(esc(sym))
+      create!(stack[end], $path, $(esc(sym)))
     end
   end
 end
