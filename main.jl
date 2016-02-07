@@ -14,21 +14,21 @@ Router(f::Function=identity,
 """
 Support use with downstream middleware
 """
-handle(router::Router, next::Function) =
+Base.call(router::Router, next::Function) =
   function(req::Request)
-    res = handle(router, req)
+    res = router(req)
     403 < res.status < 406 ? next(req) : res
   end
 
 """
 Dispatch a Request to a handler on router
 """
-handle(router::Router, req::Request) = begin
+Base.call(router::Router, req::Request) = begin
   m = match(router, req.uri.path)
   m === nothing && return Response(404, "invalid path")
   node, params = m
 
-  isdefined(node, :handler) || return Response(404, "incomplete path")
+  node.handler == identity && return Response(404, "incomplete path")
 
   if applicable(node.handler, req, params...)
     node.handler(req, params...)
@@ -92,8 +92,6 @@ create!(node::Router, path::AbstractString, fn::Function) =
 to_regex(s::Void) = r"(.*)"
 to_regex(s::AbstractString) = Regex(s, "i")
 
-to_regex("user/:id(\\d+)")
-
 const stack = Router[]
 
 """
@@ -112,8 +110,7 @@ macro route(fn::Expr, path...)
     quote
       push!(stack, Router())
       $(map(esc, fn.args)...)
-      router = pop!(stack)
-      req -> handle(router, req)
+      pop!(stack)
     end
   else
     path = path[1]
