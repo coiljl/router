@@ -4,13 +4,13 @@
 immutable Router
   handler::Function
   concrete::Dict{AbstractString,Router}
-  Abstract::Vector{Tuple{Regex,Router}}
+  regexs::Vector{Pair{Regex,Router}}
 end
 
 Router(path::AbstractString) =
   Router(@eval(function $(gensym(path))() end),
          Dict{AbstractString,Router}(),
-         Tuple{Regex,Router}[])
+         Pair{Regex,Router}[])
 
 """
 The root router for use by applications only
@@ -66,9 +66,9 @@ Base.match(r::Router, p::AbstractString) = begin
     if haskey(r.concrete, seg)
       r = r.concrete[seg]
     else
-      i = findfirst(r -> ismatch(r[1], seg), r.Abstract)
+      i = findfirst(r -> ismatch(r[1], seg), r.regexs)
       i === 0 && return nothing
-      r = r.Abstract[i][2]
+      r = r.regexs[i][2]
       push!(captures, seg)
     end
   end
@@ -84,16 +84,18 @@ create!(node::Router, path::AbstractString) =
     if m === nothing
       get!(node.concrete, segment, Router(path))
     else
-      r = to_regex(m.captures[1])
-      i = findfirst(t -> t[1].pattern == r.pattern, node.Abstract)
-      if i === 0
-        push!(node.Abstract, (r, Router(path)))
-        node.Abstract[end][2]
-      else
-        node.Abstract[i][2]
-      end
+      create!(node, to_regex(m.captures[1]))
     end
   end
+
+create!(node::Router, path::Regex) = begin
+  i = findfirst(t -> t[1].pattern == path.pattern, node.regexs)
+  if i == 0
+    push!(node.regexs, path => Router(path |> string))[end][2]
+  else
+    node.regexs[i][2]
+  end
+end
 
 to_regex(s::Void) = r"(.*)"
 to_regex(s::AbstractString) = Regex(s, "i")
@@ -122,7 +124,7 @@ end
 Note that this only creates one route and one handler but this handler will
 have two methods. One for `GET` requests and one for `PUT` requests
 """
-macro route(fn::Expr, router::Symbol, path::AbstractString)
+macro route(fn::Expr, router::Symbol, path)
   params = fn.args[1].args
   types = map(param_type, params[2:end])
   names = map(param_name, params[2:end])
