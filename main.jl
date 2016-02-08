@@ -109,11 +109,11 @@ Syntax sugar for defining routes so you don't have to bother naming your route
 handlers. Instead they will take on the name of the path.
 
 ```julia
-@route router "/user/:id" do req::Request{:GET}, id::Int
+@route(router, "/user/:id") do req::Request{:GET}, id::Int
   Response(200, users[id])
 end
 
-@route router "/user/:id" do req::Request{:PUT}, id::Int
+@route(router, "/user/:id") do req::Request{:PUT}, id::Int
   users[id] = req.uri.query.name
   Response(200)
 end
