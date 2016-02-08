@@ -7,9 +7,15 @@ immutable Router
   Abstract::Vector{Tuple{Regex,Router}}
 end
 
-Router(f::Function=identity,
-       c=Dict{AbstractString,Router}(),
-       a=Tuple{Regex,Router}[]) = Router(f, c, a)
+Router(path::AbstractString) =
+  Router(@eval(function $(gensym(path))() end),
+         Dict{AbstractString,Router}(),
+         Tuple{Regex,Router}[])
+
+"""
+The root router for use by applications only
+"""
+const router = Router("/")
 
 """
 Support use with downstream middleware
@@ -27,8 +33,6 @@ Base.call(router::Router, req::Request) = begin
   m = match(router, req.uri.path)
   m === nothing && return Response(404, "invalid path")
   node, params = m
-
-  node.handler == identity && return Response(404, "incomplete path")
 
   if applicable(node.handler, req, params...)
     node.handler(req, params...)
@@ -72,16 +76,16 @@ end
 """
 Define a route for `path` on `node`
 """
-create!(node::Router, path::AbstractString, fn::Function) =
+create!(node::Router, path::AbstractString) =
   reduce(node, split(path, '/'; keep=false)) do node, segment
     m = match(r"^:[^(]*(?:\(([^\)]*)\))?$"i, segment)
     if m === nothing
-      get!(node.concrete, segment, Router(fn))
+      get!(node.concrete, segment, Router(path))
     else
       r = to_regex(m.captures[1])
       i = findfirst(t -> t[1].pattern == r.pattern, node.Abstract)
       if i === 0
-        push!(node.Abstract, (r, Router(fn)))
+        push!(node.Abstract, (r, Router(path)))
         node.Abstract[end][2]
       else
         node.Abstract[i][2]
@@ -117,7 +121,6 @@ Note that this only creates one route and one handler but this handler will
 have two methods. One for `GET` requests and one for `PUT` requests
 """
 macro route(fn::Expr, router::Symbol, path::AbstractString)
-  sym = symbol("@route\"$path\"")
   params = fn.args[1].args
   types = map(param_type, params[2:end])
   names = map(param_name, params[2:end])
@@ -126,11 +129,12 @@ macro route(fn::Expr, router::Symbol, path::AbstractString)
     :($name = $(Expr(:call, coerce, Type, name)))
   end
   body = fn.args[2].args
-  quote
-    $(esc(:(function $sym($(params...))
+  child = gensym()
+  esc(quote
+    $child = $(create!)($router, $path)
+    $child.handler($(params...)) = begin
       $(coersion...)
       $(body...)
-    end)))
-    create!($(esc(router)), $path, $(esc(sym)))
-  end
+    end
+  end)
 end
