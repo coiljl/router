@@ -60,19 +60,20 @@ Find `Router` nodes on `r` matching the path `p`
 If it matches on any abstract paths the concrete values
 of those path segments will be returned in a `AbstractString[]`
 """
-Base.match(r::Router, p::AbstractString) = begin
+Base.match(router::Router, p::AbstractString) = begin
   captures = AbstractString[]
-  for seg in split(p, '/'; keep=false)
-    if haskey(r.concrete, seg)
-      r = r.concrete[seg]
+  for segment in split(p, '/'; keep=false)
+    if haskey(router.concrete, segment)
+      router = router.concrete[segment]
     else
-      i = findfirst(r -> ismatch(r[1], seg), r.regexs)
+      i = findfirst(p -> ismatch(p[1], segment), router.regexs)
       i === 0 && return nothing
-      r = r.regexs[i][2]
-      push!(captures, seg)
+      regex, router = router.regexs[i]
+      m = match(regex, segment)
+      m != nothing && !isempty(m.captures) && push!(captures, m.captures...)
     end
   end
-  (r, captures)
+  (router, captures)
 end
 
 """
@@ -80,7 +81,7 @@ Define a route for `path` on `node`
 """
 create!(node::Router, path::AbstractString) =
   reduce(node, split(path, '/'; keep=false)) do node, segment
-    m = match(r"^:[^(]*(?:\(([^\)]*)\))?$"i, segment)
+    m = match(r"^:[^(]*(?:\(([^\)]+)\))?$"i, segment)
     if m === nothing
       get!(node.concrete, segment, Router(path))
     else
@@ -97,8 +98,8 @@ create!(node::Router, path::Regex) = begin
   end
 end
 
-to_regex(s::Void) = r"(.*)"
-to_regex(s::AbstractString) = Regex(s, "i")
+to_regex(s::Void) = r"^(.*)$"
+to_regex(s::AbstractString) = Regex("^($s)\$", "i")
 
 param_type(p::Expr) = eval(p.args[2])
 param_type(p::Symbol) = Any
