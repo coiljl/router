@@ -49,7 +49,7 @@ allows(r::Router) = begin
 end
 
 """
-Find Router nodes on `r` matching the path `p`
+Find `Router` nodes on `r` matching the path `p`
 
 If it matches on any abstract paths the concrete values
 of those path segments will be returned in a `AbstractString[]`
@@ -92,50 +92,45 @@ create!(node::Router, path::AbstractString, fn::Function) =
 to_regex(s::Void) = r"(.*)"
 to_regex(s::AbstractString) = Regex(s, "i")
 
-const stack = Router[]
-
-"""
-Syntax sugar for defining routes
-
-If you pass a block `Expr` it will define a group of `Route`s and return
-a `Function` which dispatches `Request`s to these `Route`s
-
-If you pass both a Function Expr and an `AbstractString` it will define a
-new `Route` with the Function Expr as the handler. Any parameters defined
-in the path will be coerced to the types declared in the Function
-Expr. This form is only valid inside the previous form
-"""
-macro route(fn::Expr, path...)
-  if isempty(path)
-    quote
-      push!(stack, Router())
-      $(map(esc, fn.args)...)
-      pop!(stack)
-    end
-  else
-    path = path[1]
-    sym = symbol("@route\"$path\"")
-    params = fn.args[1].args
-    types = map(param_type, params[2:end])
-    names = map(param_name, params[2:end])
-    params = [params[1], names...]
-    coersion = map(types, names) do Type, name
-      :($name = $(Expr(:call, coerce, Type, name)))
-    end
-    body = fn.args[2].args
-    quote
-      @assert !isempty(stack) "@route(::Function,::AbstractString) only valid within @route(::Expr)"
-      $(esc(:(function $sym($(params...))
-        $(coersion...)
-        $(body...)
-      end)))
-      create!(stack[end], $path, $(esc(sym)))
-    end
-  end
-end
-
 param_type(p::Expr) = eval(p.args[2])
 param_type(p::Symbol) = Any
 
 param_name(p::Expr) = p.args[1]
 param_name(p::Symbol) = p
+
+"""
+Syntax sugar for defining routes so you don't have to bother naming your route
+handlers. Instead they will take on the name of the path.
+
+```julia
+@route router "/user/:id" do req::Request{:GET}, id::Int
+  Response(200, users[id])
+end
+
+@route router "/user/:id" do req::Request{:PUT}, id::Int
+  users[id] = req.uri.query.name
+  Response(200)
+end
+```
+
+Note that this only creates one route and one handler but this handler will
+have two methods. One for `GET` requests and one for `PUT` requests
+"""
+macro route(fn::Expr, router::Symbol, path::AbstractString)
+  sym = symbol("@route\"$path\"")
+  params = fn.args[1].args
+  types = map(param_type, params[2:end])
+  names = map(param_name, params[2:end])
+  params = [params[1], names...]
+  coersion = map(types, names) do Type, name
+    :($name = $(Expr(:call, coerce, Type, name)))
+  end
+  body = fn.args[2].args
+  quote
+    $(esc(:(function $sym($(params...))
+      $(coersion...)
+      $(body...)
+    end)))
+    create!($(esc(router)), $path, $(esc(sym)))
+  end
+end
