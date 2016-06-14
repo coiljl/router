@@ -125,7 +125,7 @@ end
 Note that this only creates one route and one handler but this handler will
 have two methods. One for `GET` requests and one for `PUT` requests
 """
-macro route(fn::Expr, router::Symbol, path)
+macro route(fn::Expr, router::Symbol, paths...)
   params = fn.args[1].args
   types = map(param_type, params[2:end])
   names = map(param_name, params[2:end])
@@ -136,10 +136,14 @@ macro route(fn::Expr, router::Symbol, path)
   body = fn.args[2].args
   child = gensym()
   esc(quote
-    $child = $(create!)($router, $path)
-    $child.handler($(params...)) = begin
-      $(coersion...)
-      $(body...)
-    end
+    $(map(paths) do path
+      quote
+        $child = $(create!)($router, $path)
+        $child.handler($(params...)) = begin
+          $(coersion...)
+          $(body...)
+        end
+      end
+    end...)
   end)
 end
