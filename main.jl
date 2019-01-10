@@ -1,6 +1,6 @@
 @require "github.com/jkroso/HTTP.jl/server" Request Response verb
 
-struct Router
+struct Router <: Function
   handler::Function
   concrete::Dict{AbstractString,Router}
   regexs::Vector{Pair{Regex,Router}}
