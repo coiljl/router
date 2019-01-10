@@ -1,39 +1,31 @@
-@require "github.com/coiljl/server" Request Response serve verb
-@require "github.com/jkroso/coerce.jl" coerce
+@require "github.com/jkroso/HTTP.jl/server" Request Response verb
 
-immutable Router
+struct Router
   handler::Function
   concrete::Dict{AbstractString,Router}
   regexs::Vector{Pair{Regex,Router}}
 end
 
-Router(path::AbstractString) =
-  Router(@eval(function $(gensym(path))() end),
-         Dict{AbstractString,Router}(),
-         Pair{Regex,Router}[])
+Router(fn) = Router(fn, Dict{AbstractString,Router}(), Pair{Regex,Router}[])
 
-"""
-The root router for use by applications only
-"""
-const router = Router("/")
+"The root router for use by applications only"
+const router = Router(@eval function $(Symbol("/"))end)
 
-"""
-Support use with downstream middleware
-"""
-Base.call(router::Router, next::Function) =
+"Support use with downstream middleware"
+(router::Router)(next::Function) =
   function(req::Request)
     res = router(req)
     403 < res.status < 406 ? next(req) : res
   end
 
-"""
-Dispatch a Request to a handler on router
-"""
-Base.call(router::Router, req::Request) = begin
+"Define a route with an existing function"
+(router::Router)(path::AbstractString, fn::Function) = create!(router, path, fn)
+
+"Dispatch a Request to a handler on router"
+(router::Router)(req::Request) = begin
   m = match(router, req.uri.path)
   m === nothing && return Response(404, "invalid path")
   node, params = m
-
   if applicable(node.handler, req, params...)
     node.handler(req, params...)
   else
@@ -62,12 +54,12 @@ of those path segments will be returned in a `AbstractString[]`
 """
 Base.match(router::Router, p::AbstractString) = begin
   captures = AbstractString[]
-  for segment in split(p, '/'; keep=false)
+  for segment in split(p, '/'; keepempty=false)
     if haskey(router.concrete, segment)
       router = router.concrete[segment]
     else
-      i = findfirst(p -> ismatch(p[1], segment), router.regexs)
-      i === 0 && return nothing
+      i = findfirst(p -> occursin(p[1], segment), router.regexs)
+      i === nothing && return nothing
       regex, router = router.regexs[i]
       m = match(regex, segment)
       m != nothing && !isempty(m.captures) && push!(captures, m.captures...)
@@ -76,32 +68,32 @@ Base.match(router::Router, p::AbstractString) = begin
   (router, captures)
 end
 
-"""
-Define a route for `path` on `node`
-"""
-create!(node::Router, path::AbstractString) =
-  reduce(node, split(path, '/'; keep=false)) do node, segment
+"Define a route for `path` on `node`"
+create!(node::Router, path::AbstractString, fn) = begin
+  segments = split(path, '/', keepempty=false)
+  for (i, segment) in enumerate(segments)
+    islast = i == length(segments)
+    f = islast ? fn : @eval function $(Symbol(segment))end
     m = match(r"^:[^(]*(?:\(([^\)]+)\))?$"i, segment)
-    if m === nothing
-      get!(node.concrete, segment, Router(path))
+    node = if m === nothing
+      get!(node.concrete, segment, Router(f))
     else
-      create!(node, to_regex(m.captures[1]))
+      s = to_regex(m.captures[1])
+      i = findfirst(t -> t.pattern == s.pattern, map(first, node.regexs))
+      if i == nothing
+        push!(node.regexs, s => Router(f))[end][2]
+      else
+        node.regexs[i][2]
+      end
     end
   end
-
-create!(node::Router, path::Regex) = begin
-  i = findfirst(t -> t[1].pattern == path.pattern, node.regexs)
-  if i == 0
-    push!(node.regexs, path => Router(path |> string))[end][2]
-  else
-    node.regexs[i][2]
-  end
+  node
 end
 
-to_regex(s::Void) = r"^(.*)$"
+to_regex(s::Nothing) = r"^(.*)$"
 to_regex(s::AbstractString) = Regex("^($s)\$", "i")
 
-param_type(p::Expr) = eval(p.args[2])
+param_type(p::Expr) = p.args[2]
 param_type(p::Symbol) = Any
 
 param_name(p::Expr) = p.args[1]
@@ -112,11 +104,11 @@ Syntax sugar for defining routes so you don't have to bother naming your route
 handlers. Instead they will take on the name of the path.
 
 ```julia
-@route(router, "/user/:id") do req::Request{:GET}, id::Int
+@route "/user/:id" function(req::Request{:GET}, id::Int)
   Response(200, users[id])
 end
 
-@route(router, "/user/:id") do req::Request{:PUT}, id::Int
+@route "/user/:id" function(req::Request{:PUT}, id::Int)
   users[id] = req.uri.query.name
   Response(200)
 end
@@ -125,25 +117,21 @@ end
 Note that this only creates one route and one handler but this handler will
 have two methods. One for `GET` requests and one for `PUT` requests
 """
-macro route(fn::Expr, router::Symbol, paths...)
+macro route(path, fn)
   params = fn.args[1].args
   types = map(param_type, params[2:end])
   names = map(param_name, params[2:end])
   params = [params[1], names...]
   coersion = map(types, names) do Type, name
-    :($name = $(Expr(:call, coerce, Type, name)))
+    :($name = $(Expr(:call, parse, Type, name)))
   end
   body = fn.args[2].args
   child = gensym()
   esc(quote
-    $(map(paths) do path
-      quote
-        $child = $(create!)($router, $path)
-        $child.handler($(params...)) = begin
-          $(coersion...)
-          $(body...)
-        end
-      end
-    end...)
+    $child = $(create!)($router, $path, function $(Symbol(path))end)
+    $child.handler($(params...)) = begin
+      $(coersion...)
+      $(body...)
+    end
   end)
 end

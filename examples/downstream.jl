@@ -1,7 +1,7 @@
-@require "github.com/coiljl/server" Request Response serve
+@require "github.com/jkroso/HTTP.jl/server" Request Response serve
 @require ".." router @route
 
-@route(router, "hit") do r::Request
+@route "hit" function(r::Request)
   Response(200, "Handled upstream")
 end
 
