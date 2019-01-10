@@ -39,9 +39,11 @@ The list of HTTP methods supported by a `Router`
 """
 allows(r::Router) = begin
   verbs = map(methods(r.handler)) do method
-    args_types = method.sig.parameters
+    args_types = method.sig.parameters[2:end]
     isempty(args_types) && return "method"
-    string(args_types[1].parameters[1])
+    params = args_types[1].parameters
+    isempty(params) && return "any"
+    string(params[1])
   end
   setdiff(unique(verbs), ["method"])
 end
